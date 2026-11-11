@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="th"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Admin Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="js/config.js"></script>
+<style>
+:root{--bg:#f2f7fd;--card:#fff;--ink:#10304f;--muted:#5d7899;--line:#cfdcee;--pri:#2563eb;--priInk:#fff;--bad:#dc2626;--ok:#16a34a;color-scheme:light dark}
+@media(prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#121b2e;--ink:#e6edf8;--muted:#8fa3c2;--line:#33425f;--pri:#5b8cff;--priInk:#0b1220;--bad:#f87171;--ok:#4ade80}}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Noto Sans Thai','Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header b{font-size:18px}
+nav{display:flex;gap:6px;overflow-x:auto;padding:10px 16px}
+nav button{white-space:nowrap}
+main{max-width:1100px;margin:0 auto;padding:8px 16px 40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat b{display:block;font-size:28px}.stat span{color:var(--muted);font-size:13px}
+.btn,select,input,button{font:inherit;color:var(--ink)}
+.btn,nav button,.sm{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:8px 14px;cursor:pointer}
+.btn.pri,nav button.on{background:var(--pri);color:var(--priInk);border-color:var(--pri);font-weight:700}
+.btn.bad{color:var(--bad);border-color:var(--bad)}.sm{padding:4px 10px;font-size:13px}
+input,select{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;max-width:100%}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+.wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-size:12px}
+.muted{color:var(--muted)}.err{color:var(--bad)}
+label.f{display:block;margin:10px 0 4px;font-size:13px;color:var(--muted)}label.f+*{width:100%}
+label.chk{display:flex;gap:8px;align-items:center;margin:6px 0}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);width:min(420px,92vw)}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:99}
+pre{white-space:pre-wrap;word-break:break-word;font-size:12px;margin:4px 0}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--pri);outline-offset:2px}
+</style></head><body>
+<div id="app"></div>
+<script>
+(function(){
+"use strict";
+var CFG=window.APP_CONFIG||{},DOM="users.example.com";
+var PHASES=["Main Activities","Pilot","Mass","Ship"],ROLES=["admin","editor","viewer","pending","disabled"];
+var DATE_RE=/^\d{1,2}-[A-Za-z]{3}-(\d{2}|\d{4})( to \d{1,2}-[A-Za-z]{3}-(\d{2}|\d{4}))?$/,ISO_RE=/^\d{4}-\d{2}-\d{2}$/;
+var sb,me,projects=[],app=document.getElementById("app");
+
+function h(t,a){var e=document.createElement(t);Object.keys(a||{}).forEach(function(n){var v=a[n];
+  if(n==="class")e.className=v;else if(n.slice(0,2)==="on")e.addEventListener(n.slice(2),v);
+  else if(v===true)e.setAttribute(n,"");else if(v!==false&&v!=null)e.setAttribute(n,v)});
+  e.append.apply(e,[].slice.call(arguments,2).flat().filter(function(c){return c!=null&&c!==false}));return e}
+function toast(m,bad){var t=document.getElementById("toast")||h("div",{id:"toast",role:"status"});t.textContent=m;t.style.background=bad?"var(--bad)":"";document.body.append(t);clearTimeout(t._t);t._t=setTimeout(function(){t.remove()},3500)}
+async function q(p){var r=await p;if(r.error)throw r.error;return r.data}
+function fail(e){console.error(e);toast(e&&e.code==="23505"?"ข้อมูลซ้ำ":(e&&e.message)||"เกิดข้อผิดพลาด",true)}
+async function call(body){var r=await sb.functions.invoke("admin-users",{body:body});
+  if(r.error){var m=r.error.message;try{m=(await r.error.context.json()).error||m}catch(e){}throw new Error(m)}return r.data}
+async function all(t,c,ord){var out=[],from=0;for(;;){var qq=sb.from(t).select(c);if(ord)qq=qq.order(ord);var rows=await q(qq.range(from,from+999));out=out.concat(rows);if(rows.length<1000)return out;from+=1000}}
+function fmt(x){return new Date(x).toLocaleString("th-TH",{timeZone:"Asia/Bangkok"})}
+async function loadProjects(){projects=await q(sb.from("projects").select("id,year,name").order("year"))}
+function yearSel(cur,on){var s=h("select",{"aria-label":"ปี",onchange:function(){on(s.value)}},projects.map(function(p){return h("option",{value:p.id,selected:p.id===cur},String(p.year))}));return s}
+function sel(opts,cur){return h("select",{},opts.map(function(o){return h("option",{value:o,selected:o===cur},o)}))}
+function field(l,el){return [h("label",{class:"f"},l),el]}
+function modal(title,body,onSave){var d=h("dialog",{});var msg=h("p",{class:"err",role:"alert"});
+  d.append(h("h3",{},title),body,msg,h("div",{class:"bar",style:"margin-top:14px"},
+    h("button",{class:"btn pri",onclick:async function(){try{var m=await onSave();if(m){msg.textContent=m;return}d.close()}catch(e){msg.textContent=(e&&e.message)||"ผิดพลาด"}}},"บันทึก"),
+    h("button",{class:"btn",onclick:function(){d.close()}},"ยกเลิก")));
+  d.addEventListener("close",function(){d.remove()});document.body.append(d);d.showModal()}
+
+/* ---------- Login / Guard ---------- */
+function viewLogin(msg){
+  var u=h("input",{autocomplete:"username",maxlength:20}),p=h("input",{type:"password",autocomplete:"current-password"}),e=h("p",{class:"err",role:"alert"},msg||"");
+  async function go(){e.textContent="";var name=u.value.trim().toLowerCase();
+    if(!/^[a-z0-9_.\-]{3,20}$/.test(name)||!p.value){e.textContent="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";return}
+    var r=await sb.auth.signInWithPassword({email:name+"@"+DOM,password:p.value});
+    if(r.error){e.textContent="ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";return}
+    start()}
+  p.addEventListener("keydown",function(ev){if(ev.key==="Enter")go()});
+  app.replaceChildren(h("main",{style:"max-width:380px;margin-top:10vh"},h("div",{class:"card"},h("h2",{},"Admin Login"),
+    field("ชื่อผู้ใช้",u),field("รหัสผ่าน",p),e,h("button",{class:"btn pri",onclick:go,style:"margin-top:10px;width:100%"},"เข้าสู่ระบบ"))))}
+async function start(){
+  try{var s=(await sb.auth.getSession()).data.session;if(!s)return viewLogin();
+    var uid=s.user.id;me=await q(sb.from("profiles").select("id,username,role").eq("id",uid).single());
+    if(me.role!=="admin"){app.replaceChildren(h("main",{},h("div",{class:"card"},h("h2",{},"ไม่มีสิทธิ์เข้าหน้านี้"),h("p",{class:"muted"},"หน้านี้สำหรับ Admin เท่านั้น"),
+      h("a",{href:"index.html"},"กลับหน้า Gantt")," ",h("button",{class:"btn",onclick:logout},"ออกจากระบบ"))));return}
+    await loadProjects();shell("home")}catch(e){fail(e);viewLogin("โหลดข้อมูลไม่สำเร็จ")}}
+async function logout(){await sb.auth.signOut();viewLogin()}
+
+/* ---------- Shell ---------- */
+var TABS=[["home","ภาพรวม"],["tasks","กิจกรรม"],["hol","วันหยุดและปี"],["users","ผู้ใช้และสิทธิ์"],["audit","ประวัติแก้ไข"],["imp","นำเข้าข้อมูลเดิม"]];
+var VIEWS={home:viewHome,tasks:viewTasks,hol:viewHol,users:viewUsers,audit:viewAudit,imp:viewImport};
+function shell(tab){
+  var m=h("main",{});
+  app.replaceChildren(h("header",{},h("b",{},"Gantt Admin"),h("span",{class:"muted"},"ผู้ใช้: "+me.username+" "),
+    h("span",{},h("a",{href:"index.html"},"หน้า Gantt")," ",h("button",{class:"sm",onclick:logout},"ออกจากระบบ"))),
+    h("nav",{},TABS.map(function(t){return h("button",{class:t[0]===tab?"on":"",onclick:function(){shell(t[0])}},t[1])})),m);
+  VIEWS[tab](m).catch(fail)}
+
+/* ---------- Home ---------- */
+async function viewHome(m){
+  var cnt=async function(t){return (await sb.from(t).select("*",{count:"exact",head:true})).count||0};
+  var r=await Promise.all([cnt("tasks"),cnt("holidays"),cnt("projects"),q(sb.from("profiles").select("role")),
+    q(sb.from("audit_logs").select("at,username,action,table_name").order("at",{ascending:false}).limit(8))]);
+  var byRole={};r[3].forEach(function(x){byRole[x.role]=(byRole[x.role]||0)+1});
+  function st(n,l){return h("div",{class:"card stat"},h("b",{},String(n)),h("span",{},l))}
+  m.append(h("div",{class:"grid"},st(r[0],"กิจกรรม"),st(r[1],"วันหยุด"),st(r[2],"ปี"),st(r[3].length,"ผู้ใช้")),
+    h("div",{class:"card"},h("b",{},"ผู้ใช้ตามสิทธิ์: "),ROLES.map(function(k){return k+" "+(byRole[k]||0)}).join(" · ")),
+    h("div",{class:"card"},h("b",{},"กิจกรรมล่าสุด"),h("div",{class:"wrap"},h("table",{},r[4].map(function(l){return h("tr",{},h("td",{},fmt(l.at)),h("td",{},l.username||"-"),h("td",{},l.action+" "+l.table_name))})))))}
+
+/* ---------- Tasks CRUD ---------- */
+async function viewTasks(m){
+  if(!projects.length){m.append(h("p",{},"ยังไม่มีปี"));return}
+  var pid=projects[0].id,search=h("input",{type:"search",placeholder:"ค้นหากิจกรรม…","aria-label":"ค้นหา"}),ph=h("select",{"aria-label":"Phase"},h("option",{value:""},"ทุก Phase"),PHASES.map(function(p){return h("option",{value:p},p)}));
+  var list=h("div",{class:"wrap"}),rows=[];
+  async function load(){rows=await q(sb.from("tasks").select("*").eq("project_id",pid).order("phase").order("no").limit(1000));draw()}
+  function draw(){var s=search.value.trim().toLowerCase(),f=ph.value;
+    var v=rows.filter(function(t){return(!f||t.phase===f)&&(!s||t.task.toLowerCase().indexOf(s)>=0||t.date_text.toLowerCase().indexOf(s)>=0)});
+    list.replaceChildren(h("table",{},h("tr",{},["Phase","No","กิจกรรม","วันที่","สี",""].map(function(x){return h("th",{},x)})),
+      v.map(function(t){return h("tr",{},h("td",{},t.phase),h("td",{},String(t.no)),h("td",{},t.task),h("td",{},t.date_text),h("td",{},t.color),
+        h("td",{},h("button",{class:"sm",onclick:function(){form(t)}},"แก้ไข")," ",h("button",{class:"sm bad",onclick:function(){del(t)}},"ลบ")))})),
+      v.length?null:h("p",{class:"muted"},"ไม่พบข้อมูล"))}
+  async function del(t){if(!confirm("ลบกิจกรรม \""+t.task+"\" ?"))return;try{await q(sb.from("tasks").delete().eq("id",t.id).select("id"));toast("ลบแล้ว");load()}catch(e){fail(e)}}
+  function form(t){var f={phase:sel(PHASES,t&&t.phase),no:h("input",{type:"number",min:1,value:t?t.no:1}),task:h("input",{maxlength:200,value:t?t.task:""}),
+      date:h("input",{placeholder:"20-Apr-26 หรือ 20-Apr-26 to 25-Apr-26",value:t?t.date_text:""}),color:sel(["lightblue","blue"],t?t.color:"lightblue")};
+    modal(t?"แก้ไขกิจกรรม":"เพิ่มกิจกรรม",h("div",{},field("Phase",f.phase),field("ลำดับ (No)",f.no),field("ชื่อกิจกรรม",f.task),field("วันที่",f.date),field("สี",f.color)),async function(){
+      var row={phase:f.phase.value,no:Number(f.no.value),task:f.task.value.trim(),date_text:f.date.value.trim(),color:f.color.value};
+      if(!row.task)return"กรุณากรอกชื่อกิจกรรม";if(!(row.no>=1))return"ลำดับต้องเป็นเลข 1 ขึ้นไป";if(!DATE_RE.test(row.date_text))return"รูปแบบวันที่ไม่ถูกต้อง เช่น 20-Apr-26";
+      try{if(t)await q(sb.from("tasks").update(row).eq("id",t.id).select("id"));else{row.project_id=pid;await q(sb.from("tasks").insert(row).select("id"))}}
+      catch(e){return e.code==="23505"?"มีกิจกรรมนี้อยู่แล้ว (Phase/ชื่อ/วันที่เหมือนกัน)":e.message}
+      toast("บันทึกแล้ว");load()})}
+  search.addEventListener("input",draw);ph.addEventListener("change",draw);
+  m.append(h("div",{class:"card"},h("div",{class:"bar"},yearSel(pid,function(v){pid=v;load()}),ph,search,h("button",{class:"btn pri",onclick:function(){form(null)}},"+ เพิ่มกิจกรรม")),list));
+  await load()}
+
+/* ---------- Holidays + Years ---------- */
+async function viewHol(m){
+  if(!projects.length)return;
+  var pid=projects[0].id,box=h("div",{class:"wrap"}),nm=h("input",{maxlength:200,"aria-label":"ชื่อโปรเจกต์"});
+  async function load(){var p=projects.find(function(x){return x.id===pid});nm.value=p.name||"";
+    var rows=await q(sb.from("holidays").select("*").eq("project_id",pid).order("date"));
+    box.replaceChildren(h("table",{},h("tr",{},h("th",{},"วันที่"),h("th",{},"ชื่อ"),h("th",{},"")),rows.map(function(r){return h("tr",{},h("td",{},r.date),h("td",{},r.name),
+      h("td",{},h("button",{class:"sm bad",onclick:async function(){if(!confirm("ลบวันหยุด "+r.date+" ?"))return;try{await q(sb.from("holidays").delete().eq("id",r.id).select("id"));load()}catch(e){fail(e)}}},"ลบ")))})),
+      rows.length?null:h("p",{class:"muted"},"ยังไม่มีวันหยุด"))}
+  var d=h("input",{type:"date"}),n=h("input",{placeholder:"ชื่อวันหยุด",maxlength:100});
+  async function addH(){if(!ISO_RE.test(d.value)||!n.value.trim()){toast("กรอกวันที่และชื่อ",true);return}
+    try{await q(sb.from("holidays").insert({project_id:pid,date:d.value,name:n.value.trim()}).select("id"));n.value="";load()}catch(e){fail(e)}}
+  var ny=h("input",{type:"number",min:2000,max:2100,placeholder:"ปี เช่น 2030"});
+  m.append(h("div",{class:"card"},h("h3",{},"วันหยุด"),h("div",{class:"bar"},yearSel(pid,function(v){pid=v;load()}),d,n,h("button",{class:"btn pri",onclick:addH},"+ เพิ่ม")),box),
+    h("div",{class:"card"},h("h3",{},"ชื่อโปรเจกต์ของปีที่เลือก"),h("div",{class:"bar"},nm,h("button",{class:"btn pri",onclick:async function(){
+      try{await q(sb.from("projects").update({name:nm.value.trim()}).eq("id",pid).select("id"));await loadProjects();toast("บันทึกแล้ว")}catch(e){fail(e)}}},"บันทึกชื่อ"))),
+    h("div",{class:"card"},h("h3",{},"จัดการปี"),h("div",{class:"bar"},ny,h("button",{class:"btn",onclick:async function(){var y=Number(ny.value);if(!(y>=2000&&y<=2100)){toast("ปีไม่ถูกต้อง",true);return}
+      try{await q(sb.from("projects").upsert({year:y},{onConflict:"year"}).select("id"));toast("เพิ่มปีแล้ว");shell("hol")}catch(e){fail(e)}}},"+ เพิ่มปี"),
+      h("button",{class:"btn bad",onclick:async function(){var p=projects.find(function(x){return x.id===pid});
+        if(prompt("ลบปี "+p.year+" รวมกิจกรรม วันหยุด และ Board ทั้งหมดของปีนี้อย่างถาวร\nพิมพ์ปีเพื่อยืนยัน")!==String(p.year))return;
+        try{await q(sb.from("projects").delete().eq("id",pid).select("id"));toast("ลบปีแล้ว");shell("hol")}catch(e){fail(e)}}},"ลบปีที่เลือก"))));
+  await load()}
+
+/* ---------- Users ---------- */
+async function viewUsers(m){
+  var set=await q(sb.from("app_settings").select("value").eq("key","signup_default_role").single());
+  var def=sel(["editor","viewer","pending"],set.value);
+  def.addEventListener("change",async function(){try{await q(sb.from("app_settings").update({value:def.value}).eq("key","signup_default_role").select("key"));toast("บันทึกแล้ว")}catch(e){fail(e)}});
+  var users=await q(sb.from("profiles").select("id,username,role,created_at").order("created_at"));
+  var tb=h("table",{},h("tr",{},["ชื่อผู้ใช้","สิทธิ์","สร้างเมื่อ",""].map(function(x){return h("th",{},x)})),users.map(function(u){
+    var self=u.id===me.id,rs=sel(ROLES,u.role);rs.disabled=self;rs.setAttribute("aria-label","สิทธิ์ของ "+u.username);
+    rs.addEventListener("change",async function(){try{await q(sb.from("profiles").update({role:rs.value}).eq("id",u.id).select("id"));toast("เปลี่ยนสิทธิ์แล้ว")}catch(e){fail(e);rs.value=u.role}});
+    return h("tr",{},h("td",{},u.username+(self?" (คุณ)":"")),h("td",{},rs),h("td",{},fmt(u.created_at)),h("td",{},
+      h("button",{class:"sm",onclick:function(){resetPw(u)}},"ตั้งรหัสผ่านใหม่")," ",self?null:h("button",{class:"sm bad",onclick:async function(){
+        if(!confirm("ลบบัญชี "+u.username+" อย่างถาวร?"))return;try{await call({action:"delete_user",user_id:u.id});toast("ลบแล้ว");shell("users")}catch(e){fail(e)}}},"ลบ")))}));
+  function resetPw(u){var p=h("input",{type:"password",autocomplete:"new-password"});
+    modal("ตั้งรหัสผ่านใหม่: "+u.username,h("div",{},field("รหัสผ่านใหม่ (8 ตัวขึ้นไป)",p)),async function(){
+      if(p.value.length<8)return"รหัสผ่านต้องยาวอย่างน้อย 8 ตัว";await call({action:"reset_password",user_id:u.id,password:p.value});toast("เปลี่ยนรหัสผ่านแล้ว")})}
+  function create(){var f={u:h("input",{maxlength:20}),p:h("input",{type:"password",autocomplete:"new-password"}),r:sel(["editor","viewer","pending","admin"],"editor")};
+    modal("สร้างบัญชี",h("div",{},field("ชื่อผู้ใช้ (A-Z 0-9 _ . -)",f.u),field("รหัสผ่าน (8 ตัวขึ้นไป)",f.p),field("สิทธิ์",f.r)),async function(){
+      var name=f.u.value.trim().toUpperCase();if(!/^[A-Z0-9_.\-]{3,20}$/.test(name))return"ชื่อผู้ใช้ไม่ถูกต้อง";if(f.p.value.length<8)return"รหัสผ่านต้องยาวอย่างน้อย 8 ตัว";
+      await call({action:"create_user",username:name,password:f.p.value,role:f.r.value});toast("สร้างบัญชีแล้ว");shell("users")})}
+  m.append(h("div",{class:"card"},h("div",{class:"bar"},h("b",{},"สิทธิ์เริ่มต้นของผู้สมัครเอง:"),def,h("button",{class:"btn pri",onclick:create},"+ สร้างบัญชี")),
+    h("p",{class:"muted"},"pending = รอ Admin อนุมัติ (ยังไม่เห็นข้อมูล) · viewer = ดูอย่างเดียว · disabled = ปิดใช้งาน"),h("div",{class:"wrap"},tb)))}
+
+/* ---------- Audit ---------- */
+async function viewAudit(m){
+  var tf=h("select",{"aria-label":"ตาราง"},h("option",{value:""},"ทุกตาราง"),["tasks","holidays","projects","boards","profiles","auth.users"].map(function(t){return h("option",{value:t},t)}));
+  var uf=h("input",{placeholder:"ชื่อผู้ใช้",maxlength:20}),box=h("div",{class:"wrap"});
+  function sum(l){var o=l.old_data||{},n=l.new_data||{};
+    if(l.action==="UPDATE")return Object.keys(n).filter(function(k){return k!=="updated_at"&&k!=="updated_by"&&JSON.stringify(n[k])!==JSON.stringify(o[k])}).map(function(k){return k+": "+o[k]+" → "+n[k]}).join(" | ")||"-";
+    var d=n.task||o.task||n.name||o.name||n.username||o.username||n.year||o.year;return d==null?"":String(d)}
+  async function load(){var qq=sb.from("audit_logs").select("*").order("at",{ascending:false}).limit(200);
+    if(tf.value)qq=qq.eq("table_name",tf.value);if(uf.value.trim())qq=qq.ilike("username",uf.value.trim().toUpperCase());
+    var rows=await q(qq);box.replaceChildren(h("table",{},h("tr",{},["เวลา","ผู้ใช้","การกระทำ","ตาราง","รายละเอียด"].map(function(x){return h("th",{},x)})),
+      rows.map(function(l){return h("tr",{},h("td",{},fmt(l.at)),h("td",{},l.username||"-"),h("td",{},l.action),h("td",{},l.table_name),
+        h("td",{},sum(l),l.old_data||l.new_data?h("details",{},h("summary",{class:"muted"},"ดูข้อมูลดิบ"),h("pre",{},JSON.stringify({old:l.old_data,new:l.new_data},null,1))):null))})),
+      rows.length?null:h("p",{class:"muted"},"ไม่พบประวัติ"))}
+  tf.addEventListener("change",function(){load().catch(fail)});uf.addEventListener("input",function(){clearTimeout(uf._t);uf._t=setTimeout(function(){load().catch(fail)},400)});
+  m.append(h("div",{class:"card"},h("div",{class:"bar"},tf,uf,h("span",{class:"muted"},"แสดง 200 รายการล่าสุด")),box));await load()}
+
+/* ---------- Import (จากไฟล์ migrate.html) ---------- */
+async function viewImport(m){
+  var file=h("input",{type:"file",accept:".json,application/json"}),box=h("div");
+  file.addEventListener("change",async function(){box.replaceChildren();var j;
+    try{j=JSON.parse(await file.files[0].text())}catch(e){box.append("ไฟล์ไม่ใช่ JSON");return}
+    if(j.format!=="gantt-export-v1"||!j.accounts){box.append("ไม่ใช่ไฟล์ที่สร้างจาก migrate.html");return}
+    var names=Object.keys(j.accounts),cs=names.map(function(n){return h("input",{type:"checkbox",checked:true,value:n})});
+    box.append(h("p",{},"เลือกบัญชีที่ต้องการนำเข้า (ข้อมูลจะถูกรวมและตัดรายการซ้ำ)"),names.map(function(n,i){return h("label",{class:"chk"},cs[i],n)}),
+      h("button",{class:"btn pri",onclick:function(){runImport(j,cs.filter(function(c){return c.checked}).map(function(c){return c.value})).catch(fail)}},"ตรวจสอบและนำเข้า"))});
+  m.append(h("div",{class:"card"},h("h3",{},"นำเข้าข้อมูลเดิม"),h("p",{class:"muted"},"เลือกไฟล์ .json ที่ได้จาก migrate.html (ทำซ้ำได้หลายไฟล์ ระบบข้ามรายการที่มีอยู่แล้ว ไม่ทับของเดิม)"),file,box))}
+
+async function runImport(j,sel){
+  var T=new Map(),H=new Map(),N={},B={},bad=0,Y=/^\d{4}$/;
+  sel.forEach(function(n){var a=j.accounts[n]||{};
+    Object.keys(a.yearly||{}).forEach(function(y){var l=a.yearly[y];if(!Y.test(y)||!Array.isArray(l))return;
+      l.forEach(function(t){var r={y:y,phase:t.phase,no:Number(t.no),task:String(t.task||"").trim(),date_text:String(t.date||"").trim(),color:t.color==="blue"?"blue":"lightblue"};
+        if(PHASES.indexOf(r.phase)<0||!r.task||r.task.length>200||!DATE_RE.test(r.date_text)||!(r.no>=1)){bad++;return}
+        T.set(y+"|"+r.phase+"|"+r.task+"|"+r.date_text,r)})});
+    var ex=a.extra||{};
+    Object.keys(ex.names||{}).forEach(function(y){if(Y.test(y)&&ex.names[y]&&!N[y])N[y]=String(ex.names[y]).slice(0,200)});
+    Object.keys(ex.holidays||{}).forEach(function(y){if(Y.test(y))(ex.holidays[y]||[]).forEach(function(x){if(!ISO_RE.test(x.date||""))return;
+      var nm=String(x.name||"Holiday").trim().slice(0,100)||"Holiday";H.set(y+"|"+x.date+"|"+nm,{y:y,date:x.date,name:nm})})});
+    Object.keys(a.board||{}).forEach(function(y){var b=a.board[y];if(Y.test(y)&&b&&((b.strokes||[]).length||(b.items||[]).length)&&!B[y])B[y]=b})});
+  var years=[];function addY(y){y=String(y);if(Y.test(y)&&+y>=2000&&+y<=2100&&years.indexOf(y)<0)years.push(y)}
+  T.forEach(function(r){addY(r.y)});H.forEach(function(r){addY(r.y)});Object.keys(N).forEach(addY);Object.keys(B).forEach(addY);
+  await loadProjects();var yearOf={};projects.forEach(function(p){yearOf[p.id]=String(p.year)});
+  var exT={},exH={},exB={};
+  (await all("tasks","project_id,phase,task,date_text","id")).forEach(function(t){exT[yearOf[t.project_id]+"|"+t.phase+"|"+t.task+"|"+t.date_text]=1});
+  (await all("holidays","project_id,date,name","id")).forEach(function(t){exH[yearOf[t.project_id]+"|"+t.date+"|"+t.name]=1});
+  (await all("boards","project_id")).forEach(function(b){exB[yearOf[b.project_id]]=1});
+  var nT=[],nH=[],nB=years.filter(function(y){return B[y]&&!exB[y]});
+  T.forEach(function(r,k){if(!exT[k])nT.push(r)});H.forEach(function(r,k){if(!exH[k])nH.push(r)});
+  if(!confirm("สรุปก่อนนำเข้า\n• กิจกรรมใหม่ "+nT.length+" (ซ้ำ/มีอยู่แล้ว "+(T.size-nT.length)+", ข้อมูลไม่ถูกต้อง "+bad+")\n• วันหยุดใหม่ "+nH.length+"\n• Board ใหม่ "+nB.length+" ปี\n• ปีที่เกี่ยวข้อง: "+years.join(", ")+"\n\nดำเนินการต่อ?"))return;
+  for(var i=0;i<years.length;i++)await q(sb.from("projects").upsert({year:+years[i]},{onConflict:"year"}).select("id"));
+  await loadProjects();var pid={};projects.forEach(function(p){pid[String(p.year)]=p});
+  for(i=0;i<years.length;i++){var p=pid[years[i]];if(N[years[i]]&&!p.name)await q(sb.from("projects").update({name:N[years[i]]}).eq("id",p.id).select("id"))}
+  async function chunks(t,rows){for(var k=0;k<rows.length;k+=200)await q(sb.from(t).insert(rows.slice(k,k+200)).select("id"))}
+  await chunks("tasks",nT.map(function(r){return{project_id:pid[r.y].id,phase:r.phase,no:r.no,task:r.task,date_text:r.date_text,color:r.color}}));
+  await chunks("holidays",nH.map(function(r){return{project_id:pid[r.y].id,date:r.date,name:r.name}}));
+  for(i=0;i<nB.length;i++)await q(sb.from("boards").upsert({project_id:pid[nB[i]].id,data:B[nB[i]]},{onConflict:"project_id"}).select("project_id"));
+  toast("นำเข้าเสร็จ: กิจกรรม "+nT.length+", วันหยุด "+nH.length+", Board "+nB.length);shell("imp")}
+
+/* ---------- Boot ---------- */
+if(!window.supabase||!CFG.SUPABASE_URL||/YOUR_/.test(CFG.SUPABASE_URL+CFG.SUPABASE_KEY)){app.append(h("main",{},h("div",{class:"card err"},"ยังไม่ได้ตั้งค่า js/config.js")))}
+else{sb=window.supabase.createClient(CFG.SUPABASE_URL,CFG.SUPABASE_KEY);start()}
+})();
+</script></body></html>
