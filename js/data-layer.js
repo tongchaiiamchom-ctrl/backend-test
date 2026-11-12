@@ -51,6 +51,15 @@ DL.signUp = async function (email, pw, username) {
   var r = await sb.auth.signUp({ email: email, password: pw, options: { data: { username: username } } }); if (r.error) throw r.error;
   return !!(r.data && r.data.session);   // false = Supabase ยังบังคับยืนยันอีเมล (ต้องปิด Confirm email)
 };
+DL.register = async function (username, pw) {   // สมัครผ่าน Edge Function "register" (ไม่ต้องใช้อีเมลจริง)
+  var r = await fetch(CFG.SUPABASE_URL + "/functions/v1/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "apikey": CFG.SUPABASE_KEY },
+    body: JSON.stringify({ username: username, password: pw })
+  });
+  var j = {}; try { j = await r.json(); } catch (e) {}
+  if (!r.ok) { var e = new Error(j.error || "สมัครไม่สำเร็จ"); e.custom = true; throw e; }
+};
 DL.loadProfile = async function () {
   var u = (await sb.auth.getUser()).data.user;
   if (!u) throw new Error("ไม่พบผู้ใช้");
