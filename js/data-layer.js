@@ -49,11 +49,15 @@ DL.signIn = async function (email, pw) {
 };
 DL.signUp = async function (email, pw, username) {
   var r = await sb.auth.signUp({ email: email, password: pw, options: { data: { username: username } } }); if (r.error) throw r.error;
+  return !!(r.data && r.data.session);   // false = Supabase ยังบังคับยืนยันอีเมล (ต้องปิด Confirm email)
 };
 DL.loadProfile = async function () {
   var u = (await sb.auth.getUser()).data.user;
   if (!u) throw new Error("ไม่พบผู้ใช้");
-  var p = await ok(sb.from("profiles").select("username,role").eq("id", u.id).single());
+  var pr = await sb.from("profiles").select("username,role").eq("id", u.id).maybeSingle();
+  if (pr.error) throw pr.error;
+  if (!pr.data) { var e = new Error("บัญชีนี้ยังไม่มีโปรไฟล์ในระบบ กรุณาแจ้ง Admin"); e.custom = true; throw e; }
+  var p = pr.data;
   DL.username = p.username; DL.role = p.role; DL.canEdit = p.role === "admin" || p.role === "editor";
   return p.role;
 };
@@ -193,4 +197,3 @@ DL.startSync = function () {
 
 window.DL = DL;
 })();
-
