@@ -532,7 +532,7 @@ const $=id=>document.getElementById(id);
 const EMAIL_DOMAIN="users.example.com";
 const toEmail=u=>u.toLowerCase()+"@"+EMAIL_DOMAIN;
 const cleanUser=v=>String(v||"").trim().toUpperCase();
-const USER_RE=/^[A-Z0-9_.\-]{3,20}$/;
+const USER_RE=/^[A-Z0-9](?:[A-Z0-9_-]|\.(?!\.)){1,18}[A-Z0-9]$/;
 const LOGIN_DEFAULT_MSG="Incorrect username or password. Please try again.";
 let appStarted=false,loginBusy=false;
 
@@ -575,16 +575,13 @@ async function registerAccount(){
  const u=cleanUser($("regUser").value),p=$("regPass").value,p2=$("regPass2").value,er=$("regError");
  const fail=m=>{er.textContent=m;er.style.display="block"};
  if(!u||!p)return fail("กรุณากรอกชื่อผู้ใช้และรหัสผ่าน");
- if(!USER_RE.test(u))return fail("ชื่อผู้ใช้ใช้ได้เฉพาะ A-Z ตัวเลข _ . - ยาว 3-20 ตัว");
+ if(!USER_RE.test(u))return fail("ชื่อผู้ใช้ใช้ได้เฉพาะ A-Z ตัวเลข _ . - ยาว 3-20 ตัว และขึ้นต้น/ลงท้ายด้วยตัวอักษรหรือตัวเลข");
  if(p.length<8)return fail("รหัสผ่านต้องยาวอย่างน้อย 8 ตัว");
  if(p!==p2)return fail("รหัสผ่านทั้งสองช่องไม่ตรงกัน");
  $("regButton").disabled=true;
  try{
-  const hasSession=await DL.signUp(toEmail(u),p,u);await DL.signOut();
-  if(!hasSession)return fail("สร้างบัญชีแล้ว แต่ระบบยังบังคับยืนยันอีเมล ล็อกอินไม่ได้ กรุณาแจ้ง Admin ให้ปิด Confirm email");
-  showAuth("login");$("loginUser").value=u;$("loginPassword").value="";
-  $("authOk").textContent="สร้างบัญชีสำเร็จ — ล็อกอินได้เลย";$("authOk").style.display="block";$("loginPassword").focus();
- }catch(e){fail(/already|registered/i.test((e&&e.message)||"")?"ชื่อนี้ถูกใช้แล้ว":"สมัครไม่สำเร็จ: "+((e&&e.message)||"")) }
+  await DL.register(u,p);await DL.signIn(toEmail(u),p);await enterApp();
+ }catch(e){fail(e&&e.custom?e.message:"สมัครไม่สำเร็จ: "+((e&&e.message)||""));console.error(e)}
  finally{$("regButton").disabled=false}
 }
 $("regButton").addEventListener("click",registerAccount);
