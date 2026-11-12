@@ -565,7 +565,7 @@ async function unlockProject(){
  if(!u||!p||!USER_RE.test(u))return loginFail();
  loginBusy=true;$("loginButton").disabled=true;
  try{await DL.signIn(toEmail(u),p);await enterApp()}
- catch(e){loginFail(e&&e.custom?e.message:(e&&e.status===400?null:"เชื่อมต่อระบบไม่สำเร็จ กรุณาลองใหม่"));console.error(e)}
+ catch(e){loginFail(e&&e.custom?e.message:(e&&/not confirmed/i.test(e.message||"")?"บัญชียังไม่ได้ยืนยัน (Admin ต้องปิด Confirm email ใน Supabase)":(e&&e.status===400?null:"เชื่อมต่อระบบไม่สำเร็จ กรุณาลองใหม่")));console.error(e)}
  finally{loginBusy=false;$("loginButton").disabled=false}
 }
 $("loginButton").addEventListener("click",unlockProject);
@@ -580,7 +580,8 @@ async function registerAccount(){
  if(p!==p2)return fail("รหัสผ่านทั้งสองช่องไม่ตรงกัน");
  $("regButton").disabled=true;
  try{
-  await DL.signUp(toEmail(u),p,u);await DL.signOut();
+  const hasSession=await DL.signUp(toEmail(u),p,u);await DL.signOut();
+  if(!hasSession)return fail("สร้างบัญชีแล้ว แต่ระบบยังบังคับยืนยันอีเมล ล็อกอินไม่ได้ กรุณาแจ้ง Admin ให้ปิด Confirm email");
   showAuth("login");$("loginUser").value=u;$("loginPassword").value="";
   $("authOk").textContent="สร้างบัญชีสำเร็จ — ล็อกอินได้เลย";$("authOk").style.display="block";$("loginPassword").focus();
  }catch(e){fail(/already|registered/i.test((e&&e.message)||"")?"ชื่อนี้ถูกใช้แล้ว":"สมัครไม่สำเร็จ: "+((e&&e.message)||"")) }
